@@ -2,16 +2,6 @@
 
 Автоматизация взаимодействия с Tempo Testnet через AdsPower профили и Google Sheets.
 
-## Возможности
-
-- ✅ Подключение MetaMask к Tempo Faucet
-- ✅ Добавление сети Tempo Testnet
-- ✅ Получение тестовых токенов (Add Funds)
-- ✅ Установка fee token
-- ✅ GM-транзакции на onchaingm.com
-- ✅ Отслеживание статуса каждого шага в Google Sheet
-- ✅ Пропуск уже выполненных шагов
-
 ## Установка
 
 ```bash
@@ -77,3 +67,4 @@ python main.py --dry-run
 ## Логи
 
 Логи записываются в `tempo_automation.log`
+
