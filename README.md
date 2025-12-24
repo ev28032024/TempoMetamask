@@ -59,7 +59,7 @@ python main.py --dry-run
 ## Паттерн пароля MetaMask
 
 ```
-ОткрываюМетамаск!<serial_number>
+ВвожуПароль!<serial_number>
 ```
 
 Например для профиля 1: `ОткрываюМетамаск!1`
@@ -67,4 +67,3 @@ python main.py --dry-run
 ## Логи
 
 Логи записываются в `tempo_automation.log`
-
