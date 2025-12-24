@@ -1,13 +1,12 @@
 """
-AdsPower API wrapper for browser profile management
+AdsPower API wrapper for browser profile management with Playwright
 """
 import time
 import logging
 import requests
-from typing import Optional
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
+from typing import Optional, Tuple
+
+from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page
 
 import config
 
@@ -15,12 +14,14 @@ logger = logging.getLogger(__name__)
 
 
 class AdsPowerAPI:
-    """API wrapper for AdsPower browser management."""
+    """API wrapper for AdsPower browser management with Playwright."""
     
     def __init__(self, api_url: str = None, api_key: str = None):
         self.api_url = (api_url or config.ADSPOWER_API_URL).rstrip('/')
         self.api_key = api_key or config.ADSPOWER_API_KEY
         self._session = requests.Session()
+        self._playwright = None
+        self._browser = None
     
     def _make_request(self, endpoint: str, params: dict = None) -> dict:
         """Make API request to AdsPower."""
@@ -91,7 +92,7 @@ class AdsPowerAPI:
         Open browser for specified profile.
         
         Returns dict with:
-            - selenium_driver: WebDriver connection info
+            - ws: WebSocket connection info
             - webdriver: path to chromedriver
         """
         params = {
@@ -125,38 +126,46 @@ class AdsPowerAPI:
         except Exception:
             return {'status': 'Inactive'}
     
-    def get_selenium_driver(self, browser_data: dict) -> webdriver.Chrome:
+    def get_playwright_browser(self, browser_data: dict) -> Tuple[BrowserContext, Page]:
         """
-        Create Selenium WebDriver from AdsPower browser data.
+        Create Playwright connection from AdsPower browser data.
         
         Args:
             browser_data: Response from open_browser() method
             
         Returns:
-            Configured Chrome WebDriver instance
+            Tuple of (BrowserContext, Page)
         """
-        selenium_info = browser_data.get('ws', {})
-        debug_address = selenium_info.get('selenium')
+        ws_info = browser_data.get('ws', {})
+        puppeteer_ws = ws_info.get('puppeteer')
         
-        if not debug_address:
-            raise ValueError("No selenium debug address in browser data")
+        if not puppeteer_ws:
+            raise ValueError("No puppeteer websocket address in browser data")
         
-        chrome_options = Options()
-        chrome_options.add_experimental_option('debuggerAddress', debug_address)
+        # Start Playwright and connect via CDP
+        self._playwright = sync_playwright().start()
         
-        # Use provided chromedriver path if available
-        chromedriver_path = browser_data.get('webdriver')
+        # Connect to existing browser via CDP endpoint
+        self._browser = self._playwright.chromium.connect_over_cdp(puppeteer_ws)
         
-        if chromedriver_path:
-            service = Service(executable_path=chromedriver_path)
-            driver = webdriver.Chrome(service=service, options=chrome_options)
-        else:
-            driver = webdriver.Chrome(options=chrome_options)
+        # Get default context and page
+        context = self._browser.contexts[0] if self._browser.contexts else self._browser.new_context()
+        page = context.pages[0] if context.pages else context.new_page()
         
-        driver.set_page_load_timeout(config.PAGE_LOAD_TIMEOUT)
-        
-        logger.info(f"Selenium WebDriver connected to: {debug_address}")
-        return driver
+        logger.info(f"Playwright connected to: {puppeteer_ws}")
+        return context, page
+    
+    def cleanup(self):
+        """Cleanup Playwright resources."""
+        try:
+            if self._browser:
+                # Don't close browser - AdsPower manages it
+                self._browser = None
+            if self._playwright:
+                self._playwright.stop()
+                self._playwright = None
+        except Exception as e:
+            logger.debug(f"Cleanup error: {e}")
 
 
 def get_adspower_api() -> AdsPowerAPI:

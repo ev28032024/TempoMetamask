@@ -109,8 +109,7 @@ class GoogleSheetsManager:
         Get profiles that need processing.
         
         A profile is pending if:
-        - Overall status is not 'Ready'
-        - OR any step status is not 'OK'
+        - Overall status is not 'Ready' or doesn't contain 'Ready'
         """
         all_profiles = self.get_all_profiles()
         
@@ -118,11 +117,13 @@ class GoogleSheetsManager:
         for p in all_profiles:
             overall = p['overall_status'].strip().lower()
             
-            # Profile is pending if not marked as Ready
-            if overall != 'ready':
-                pending.append(p)
+            # Skip profiles that are already Ready
+            if 'ready' in overall:
+                continue
+            
+            pending.append(p)
         
-        logger.info(f"Found {len(pending)} pending profiles")
+        logger.info(f"Found {len(pending)} pending profiles (skipped {len(all_profiles) - len(pending)} Ready)")
         return pending
     
     def _update_cell(self, row_index: int, col_index: int, value: str) -> bool:
@@ -150,9 +151,13 @@ class GoogleSheetsManager:
         logger.info(f"Row {row_index}: Fee Token = {status}")
         return result
     
-    def update_gm_status(self, row_index: int, success: bool) -> bool:
+    def update_gm_status(self, row_index: int, success: bool, status_note: str = None) -> bool:
         """Update GM transaction step status."""
-        status = config.STATUS_OK if success else config.STATUS_FAILED
+        if success:
+            # Use status_note if provided (e.g., "Cooldown: 12:30")
+            status = status_note if status_note and status_note != "OK" else config.STATUS_OK
+        else:
+            status = config.STATUS_FAILED
         result = self._update_cell(row_index, config.SHEET_GM_STATUS_COL, status)
         logger.info(f"Row {row_index}: GM = {status}")
         return result

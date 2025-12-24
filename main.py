@@ -1,5 +1,5 @@
 """
-Tempo Testnet Automation - Main Entry Point
+Tempo Testnet Automation - Main Entry Point with Playwright
 
 Automates interactions with Tempo Testnet:
 1. Connects MetaMask to Tempo Faucet
@@ -18,7 +18,7 @@ from typing import Optional
 import config
 from adspower_api import AdsPowerAPI, get_adspower_api
 from google_sheets import GoogleSheetsManager, get_google_sheets_manager
-from metamask_helper import MetaMaskHelper
+from metamask_helper import Metamask
 from tempo_faucet import TempoFaucetAutomation
 from gm_transaction import GMTransactionAutomation
 
@@ -57,7 +57,8 @@ class ProfileProcessor:
         
         logger.info(f"Processing profile {serial_number} (row {row_index})")
         
-        driver = None
+        context = None
+        page = None
         user_id = None
         all_steps_success = True
         
@@ -75,30 +76,36 @@ class ProfileProcessor:
             browser_data = self.adspower.open_browser(user_id)
             time.sleep(3)  # Wait for browser to fully start
             
-            # Get Selenium driver
-            driver = self.adspower.get_selenium_driver(browser_data)
-            
-            # Initialize helpers
-            metamask = MetaMaskHelper(driver)
+            # Get Playwright context and page
+            context, page = self.adspower.get_playwright_browser(browser_data)
             
             # Generate MetaMask password
             password = config.get_metamask_password(serial_number)
             logger.info(f"Using password pattern for profile {serial_number}")
             
+            # Initialize MetaMask helper with context and page
+            metamask = Metamask(context, page, password)
+            
+            # Always unlock MetaMask first (browser was just opened)
+            logger.info("Unlocking MetaMask...")
+            metamask.auth_metamask()
+            
             # Check if steps need to be executed based on current status
-            need_add_funds = profile_data.get('add_funds_status', '').upper() != 'OK'
-            need_fee_token = profile_data.get('fee_token_status', '').upper() != 'OK'
-            need_gm = profile_data.get('gm_status', '').upper() != 'OK'
+            add_funds_status = profile_data.get('add_funds_status', '')
+            fee_token_status = profile_data.get('fee_token_status', '')
+            gm_status = profile_data.get('gm_status', '')
+            
+            need_add_funds = add_funds_status.upper() != 'OK'
+            need_fee_token = fee_token_status.upper() != 'OK'
+            need_gm = gm_status.upper() != 'OK'
+            
+            logger.info(f"Tasks: AddFunds={need_add_funds}, FeeToken={need_fee_token}, GM={need_gm}")
             
             # Run Tempo Faucet automation
-            faucet = TempoFaucetAutomation(driver, metamask)
+            faucet = TempoFaucetAutomation(context, page, metamask)
             
             # Step 1: Navigate to faucet and connect MetaMask
             if need_add_funds or need_fee_token:
-                logger.info("Starting Tempo Faucet automation...")
-                
-                if not faucet.navigate_to_faucet():
-                    raise Exception("Failed to navigate to faucet")
                 
                 if not faucet.connect_metamask():
                     raise Exception("Failed to connect MetaMask")
@@ -129,10 +136,10 @@ class ProfileProcessor:
             # Step 4: GM Transaction
             if need_gm:
                 logger.info("Starting GM Transaction automation...")
-                gm = GMTransactionAutomation(driver, metamask)
+                gm = GMTransactionAutomation(context, page, metamask)
                 
-                gm_success = gm.run_full_flow()
-                self.sheets.update_gm_status(row_index, gm_success)
+                gm_success, gm_status = gm.run_full_flow()
+                self.sheets.update_gm_status(row_index, gm_success, gm_status)
                 if not gm_success:
                     all_steps_success = False
                     logger.error("GM Transaction step failed")
@@ -154,11 +161,13 @@ class ProfileProcessor:
             
         finally:
             # Cleanup
-            if driver:
-                try:
-                    driver.quit()
-                except Exception:
-                    pass
+            try:
+                self.adspower.cleanup()
+            except Exception:
+                pass
+            
+            # Wait before closing browser
+            time.sleep(5)
             
             if user_id:
                 try:
@@ -249,15 +258,15 @@ def main():
     )
     
     parser.add_argument(
-        '--dry-run',
+        '--all', '-a',
         action='store_true',
-        help='List profiles to process without executing'
+        help='Process all profiles regardless of their current status'
     )
     
     parser.add_argument(
-        '--all',
+        '--dry-run',
         action='store_true',
-        help='Process all profiles regardless of status'
+        help='Print profiles that would be processed without executing'
     )
     
     args = parser.parse_args()
@@ -266,37 +275,34 @@ def main():
     logger.info("Tempo Testnet Automation Starting")
     logger.info("=" * 60)
     
-    # Validate configuration
-    errors = config.validate_config()
-    if errors:
-        for error in errors:
-            logger.error(f"Configuration error: {error}")
-        sys.exit(1)
-    
     # Check AdsPower connection
     adspower = get_adspower_api()
     if not adspower.check_connection():
-        logger.error("Cannot connect to AdsPower. Is it running?")
+        logger.error("Failed to connect to AdsPower. Make sure it's running.")
         sys.exit(1)
-    
     logger.info("AdsPower connection: OK")
     
-    # Get profiles from Google Sheets
-    sheets = get_google_sheets_manager()
+    # Get Google Sheets manager
+    try:
+        sheets = get_google_sheets_manager()
+    except Exception as e:
+        logger.error(f"Failed to connect to Google Sheets: {e}")
+        sys.exit(1)
     
+    # Get profiles to process
     if args.profile:
-        # Process specific profile
+        # Single profile mode
         all_profiles = sheets.get_all_profiles()
         profiles = [p for p in all_profiles if p['serial_number'] == args.profile]
         
         if not profiles:
-            logger.error(f"Profile {args.profile} not found in Google Sheet")
+            logger.error(f"Profile {args.profile} not found in sheet")
             sys.exit(1)
     elif args.all:
-        # Process all profiles
+        # All profiles mode
         profiles = sheets.get_all_profiles()
     else:
-        # Get pending profiles (not Ready)
+        # Pending profiles only
         profiles = sheets.get_pending_profiles()
     
     if not profiles:
@@ -305,26 +311,26 @@ def main():
     
     logger.info(f"Found {len(profiles)} profile(s) to process")
     
+    # Dry run mode
     if args.dry_run:
-        logger.info("DRY RUN - Profiles to process:")
+        logger.info("DRY RUN - Profiles that would be processed:")
         for p in profiles:
-            logger.info(
-                f"  - Serial: {p['serial_number']}, Row: {p['row_index']}, "
-                f"AddFunds: {p.get('add_funds_status', '-')}, "
-                f"FeeToken: {p.get('fee_token_status', '-')}, "
-                f"GM: {p.get('gm_status', '-')}, "
-                f"Overall: {p.get('overall_status', '-')}"
-            )
+            logger.info(f"  - Serial: {p['serial_number']}, "
+                       f"AddFunds: {p.get('add_funds_status', 'N/A')}, "
+                       f"FeeToken: {p.get('fee_token_status', 'N/A')}, "
+                       f"GM: {p.get('gm_status', 'N/A')}, "
+                       f"Overall: {p.get('overall_status', 'N/A')}")
         return
     
     # Process profiles
     results = process_profiles_parallel(profiles, max_workers=args.parallel)
     
+    # Summary
     logger.info("=" * 60)
     logger.info("Automation Complete")
-    logger.info(f"  Total: {results['total']}")
-    logger.info(f"  Success: {results['success']}")
-    logger.info(f"  Failed: {results['failed']}")
+    logger.info(f"Total: {results['total']}")
+    logger.info(f"Success: {results['success']}")
+    logger.info(f"Failed: {results['failed']}")
     logger.info("=" * 60)
 
 
