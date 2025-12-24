@@ -1,5 +1,16 @@
 # Tempo Testnet Automation
-# Автоматизация взаимодействия с Tempo Testnet через AdsPower профили
+
+Автоматизация взаимодействия с Tempo Testnet через AdsPower профили и Google Sheets.
+
+## Возможности
+
+- ✅ Подключение MetaMask к Tempo Faucet
+- ✅ Добавление сети Tempo Testnet
+- ✅ Получение тестовых токенов (Add Funds)
+- ✅ Установка fee token
+- ✅ GM-транзакции на onchaingm.com
+- ✅ Отслеживание статуса каждого шага в Google Sheet
+- ✅ Пропуск уже выполненных шагов
 
 ## Установка
 
@@ -9,32 +20,60 @@ pip install -r requirements.txt
 
 ## Настройка
 
-1. Скопируйте `.env.example` в `.env`
-2. Заполните параметры:
-   - `GOOGLE_SHEET_ID` - ID таблицы с профилями
-   - `GOOGLE_CREDENTIALS_PATH` - путь к JSON сервисного аккаунта
-   - `ADSPOWER_API_URL` - URL AdsPower API
-   - `ADSPOWER_API_KEY` - API ключ (если нужен)
+### 1. Google Sheets
 
-3. Убедитесь что AdsPower запущен
+1. Создайте сервисный аккаунт в [Google Cloud Console](https://console.cloud.google.com/)
+2. Скачайте JSON-ключ и сохраните как `credentials.json`
+3. Дайте сервисному аккаунту доступ к вашей таблице
+
+### 2. Конфигурация
+
+Отредактируйте `config.yaml`:
+
+```yaml
+google_sheets:
+  sheet_id: "ВАШ_SHEET_ID"
+  sheet_name: "Testnet (v1) (test)"
+
+adspower:
+  api_url: "http://local.adspower.net:50325"
+```
+
+### 3. Структура Google Sheet
+
+| A | B | C | D | E | F |
+|---|---|---|---|---|---|
+| Profile Number | Address | Add Funds | Set fee token | GM | Ready/Error |
+| 1 | 0x... | OK | OK | OK | Ready |
+| 2 | 0x... | | | | |
 
 ## Использование
 
 ```bash
-# Запуск для всех профилей
+# Все pending профили (не Ready)
 python main.py
 
-# Запуск для конкретного профиля
+# Конкретный профиль
 python main.py --profile 1
 
-# Запуск с ограничением параллельности
+# Все профили принудительно  
+python main.py --all
+
+# Параллельная обработка (2 профиля)
 python main.py --parallel 2
+
+# Предпросмотр
+python main.py --dry-run
 ```
 
-## Структура Google Sheet
+## Паттерн пароля MetaMask
 
-| Колонка A | Колонка B | Колонка C |
-|-----------|-----------|-----------|
-| serial_number | status | timestamp |
-| 1 | pending | |
-| 2 | completed | 2024-12-24 |
+```
+ОткрываюМетамаск!<serial_number>
+```
+
+Например для профиля 1: `ОткрываюМетамаск!1`
+
+## Логи
+
+Логи записываются в `tempo_automation.log`
