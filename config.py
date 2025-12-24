@@ -1,54 +1,66 @@
 """
 Configuration module for Tempo Testnet Automation
+Loads settings from config.yaml
 """
-import os
+import yaml
 from pathlib import Path
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
 
 # Base paths
 BASE_DIR = Path(__file__).parent.absolute()
+CONFIG_PATH = BASE_DIR / "config.yaml"
+
+# Load configuration
+def _load_config() -> dict:
+    """Load configuration from YAML file."""
+    if not CONFIG_PATH.exists():
+        raise FileNotFoundError(f"Configuration file not found: {CONFIG_PATH}")
+    
+    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+        return yaml.safe_load(f)
+
+_config = _load_config()
 
 # AdsPower Settings
-ADSPOWER_API_URL = os.getenv("ADSPOWER_API_URL", "http://local.adspower.net:50325")
-ADSPOWER_API_KEY = os.getenv("ADSPOWER_API_KEY", "")
+ADSPOWER_API_URL = _config['adspower']['api_url']
+ADSPOWER_API_KEY = _config['adspower']['api_key']
 
 # Google Sheets Settings
-GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "")
-GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH", str(BASE_DIR / "credentials.json"))
-SHEET_NAME = os.getenv("SHEET_NAME", "Sheet1")
+GOOGLE_SHEET_ID = _config['google_sheets']['sheet_id']
+GOOGLE_CREDENTIALS_PATH = str(BASE_DIR / _config['google_sheets']['credentials_path'])
+SHEET_NAME = _config['google_sheets']['sheet_name']
 
 # Sheet Column Configuration (0-indexed)
-SHEET_SERIAL_NUMBER_COL = int(os.getenv("SHEET_SERIAL_NUMBER_COL", "0"))
-SHEET_STATUS_COL = int(os.getenv("SHEET_STATUS_COL", "1"))
-SHEET_TIMESTAMP_COL = int(os.getenv("SHEET_TIMESTAMP_COL", "2"))
+SHEET_SERIAL_NUMBER_COL = _config['columns']['serial_number']
+SHEET_ADDRESS_COL = _config['columns']['address']
+SHEET_ADD_FUNDS_STATUS_COL = _config['columns']['add_funds_status']
+SHEET_FEE_TOKEN_STATUS_COL = _config['columns']['fee_token_status']
+SHEET_GM_STATUS_COL = _config['columns']['gm_status']
+SHEET_OVERALL_STATUS_COL = _config['columns']['overall_status']
 
 # MetaMask Password Pattern
-METAMASK_PASSWORD_PREFIX = os.getenv("METAMASK_PASSWORD_PREFIX", "ОткрываюМетамаск!")
+METAMASK_PASSWORD_PREFIX = _config['metamask']['password_prefix']
 
 # Parallelism
-MAX_PARALLEL_PROFILES = int(os.getenv("MAX_PARALLEL_PROFILES", "1"))
+MAX_PARALLEL_PROFILES = _config['processing']['max_parallel_profiles']
 
 # Timeouts (seconds)
-PAGE_LOAD_TIMEOUT = int(os.getenv("PAGE_LOAD_TIMEOUT", "30"))
-ELEMENT_WAIT_TIMEOUT = int(os.getenv("ELEMENT_WAIT_TIMEOUT", "15"))
-TRANSACTION_TIMEOUT = int(os.getenv("TRANSACTION_TIMEOUT", "60"))
+PAGE_LOAD_TIMEOUT = _config['timeouts']['page_load']
+ELEMENT_WAIT_TIMEOUT = _config['timeouts']['element_wait']
+TRANSACTION_TIMEOUT = _config['timeouts']['transaction']
 
 # Target URLs
-TEMPO_FAUCET_URL = "https://docs.tempo.xyz/quickstart/faucet"
-ONCHAINGM_URL = "https://onchaingm.com/"
+TEMPO_FAUCET_URL = _config['urls']['tempo_faucet']
+ONCHAINGM_URL = _config['urls']['onchaingm']
 
 # Tempo Network Details
-TEMPO_NETWORK_ID = "42429"
-TEMPO_NETWORK_NAME = "Tempo Testnet"
+TEMPO_NETWORK_ID = _config['tempo_network']['id']
+TEMPO_NETWORK_NAME = _config['tempo_network']['name']
 
 # Statuses
-STATUS_PENDING = "pending"
-STATUS_IN_PROGRESS = "in_progress"
-STATUS_COMPLETED = "completed"
-STATUS_FAILED = "failed"
+STATUS_OK = _config['statuses']['ok']
+STATUS_FAILED = _config['statuses']['failed']
+STATUS_READY = _config['statuses']['ready']
+STATUS_ERROR = _config['statuses']['error']
 
 
 def get_metamask_password(serial_number: int) -> str:
@@ -60,8 +72,8 @@ def validate_config() -> list[str]:
     """Validate configuration and return list of errors if any."""
     errors = []
     
-    if not GOOGLE_SHEET_ID:
-        errors.append("GOOGLE_SHEET_ID is not set")
+    if not GOOGLE_SHEET_ID or GOOGLE_SHEET_ID == "YOUR_SHEET_ID_HERE":
+        errors.append("google_sheets.sheet_id is not set in config.yaml")
     
     if not Path(GOOGLE_CREDENTIALS_PATH).exists():
         errors.append(f"Google credentials file not found: {GOOGLE_CREDENTIALS_PATH}")

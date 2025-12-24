@@ -4,13 +4,12 @@ Tempo Testnet Automation - Main Entry Point
 Automates interactions with Tempo Testnet:
 1. Connects MetaMask to Tempo Faucet
 2. Adds Tempo network
-3. Requests test tokens
+3. Requests test tokens (Add Funds)
 4. Sets fee token
 5. Performs GM transaction on onchaingm.com
 """
 import sys
 import time
-import asyncio
 import logging
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -48,7 +47,7 @@ class ProfileProcessor:
         Process a single profile through the complete automation flow.
         
         Args:
-            profile_data: Dict with serial_number, status, row_index
+            profile_data: Dict with serial_number, statuses, row_index
             
         Returns:
             True if successful, False otherwise
@@ -60,11 +59,9 @@ class ProfileProcessor:
         
         driver = None
         user_id = None
+        all_steps_success = True
         
         try:
-            # Mark as in progress
-            self.sheets.mark_in_progress(row_index)
-            
             # Get profile info from AdsPower
             profile_info = self.adspower.get_profile_by_serial_number(serial_number)
             
@@ -88,30 +85,67 @@ class ProfileProcessor:
             password = config.get_metamask_password(serial_number)
             logger.info(f"Using password pattern for profile {serial_number}")
             
-            # Unlock MetaMask first (navigate to extension if needed)
-            # Note: MetaMask should auto-open or we need to navigate to it
+            # Check if steps need to be executed based on current status
+            need_add_funds = profile_data.get('add_funds_status', '').upper() != 'OK'
+            need_fee_token = profile_data.get('fee_token_status', '').upper() != 'OK'
+            need_gm = profile_data.get('gm_status', '').upper() != 'OK'
             
             # Run Tempo Faucet automation
-            logger.info("Starting Tempo Faucet automation...")
             faucet = TempoFaucetAutomation(driver, metamask)
             
-            if not faucet.run_full_flow():
-                raise Exception("Tempo Faucet automation failed")
+            # Step 1: Navigate to faucet and connect MetaMask
+            if need_add_funds or need_fee_token:
+                logger.info("Starting Tempo Faucet automation...")
+                
+                if not faucet.navigate_to_faucet():
+                    raise Exception("Failed to navigate to faucet")
+                
+                if not faucet.connect_metamask():
+                    raise Exception("Failed to connect MetaMask")
+                
+                if not faucet.add_tempo_network():
+                    logger.warning("Failed to add Tempo network, continuing...")
+                
+                # Step 2: Add Funds
+                if need_add_funds:
+                    add_funds_success = faucet.request_faucet_funds()
+                    self.sheets.update_add_funds_status(row_index, add_funds_success)
+                    if not add_funds_success:
+                        all_steps_success = False
+                        logger.error("Add Funds step failed")
+                
+                time.sleep(2)
+                
+                # Step 3: Set Fee Token
+                if need_fee_token:
+                    fee_token_success = faucet.set_fee_token()
+                    self.sheets.update_fee_token_status(row_index, fee_token_success)
+                    if not fee_token_success:
+                        all_steps_success = False
+                        logger.error("Set Fee Token step failed")
             
             time.sleep(2)
             
-            # Run GM Transaction automation
-            logger.info("Starting GM Transaction automation...")
-            gm = GMTransactionAutomation(driver, metamask)
+            # Step 4: GM Transaction
+            if need_gm:
+                logger.info("Starting GM Transaction automation...")
+                gm = GMTransactionAutomation(driver, metamask)
+                
+                gm_success = gm.run_full_flow()
+                self.sheets.update_gm_status(row_index, gm_success)
+                if not gm_success:
+                    all_steps_success = False
+                    logger.error("GM Transaction step failed")
             
-            if not gm.run_full_flow():
-                raise Exception("GM Transaction automation failed")
+            # Update overall status
+            if all_steps_success:
+                self.sheets.mark_completed(row_index)
+                logger.info(f"Profile {serial_number} completed successfully")
+            else:
+                self.sheets.mark_failed(row_index, "Some steps failed")
+                logger.warning(f"Profile {serial_number} completed with errors")
             
-            # Mark as completed
-            self.sheets.mark_completed(row_index)
-            logger.info(f"Profile {serial_number} completed successfully")
-            
-            return True
+            return all_steps_success
             
         except Exception as e:
             logger.error(f"Profile {serial_number} failed: {e}")
@@ -220,6 +254,12 @@ def main():
         help='List profiles to process without executing'
     )
     
+    parser.add_argument(
+        '--all',
+        action='store_true',
+        help='Process all profiles regardless of status'
+    )
+    
     args = parser.parse_args()
     
     logger.info("=" * 60)
@@ -252,8 +292,11 @@ def main():
         if not profiles:
             logger.error(f"Profile {args.profile} not found in Google Sheet")
             sys.exit(1)
+    elif args.all:
+        # Process all profiles
+        profiles = sheets.get_all_profiles()
     else:
-        # Get pending profiles
+        # Get pending profiles (not Ready)
         profiles = sheets.get_pending_profiles()
     
     if not profiles:
@@ -265,7 +308,13 @@ def main():
     if args.dry_run:
         logger.info("DRY RUN - Profiles to process:")
         for p in profiles:
-            logger.info(f"  - Serial: {p['serial_number']}, Status: {p['status']}, Row: {p['row_index']}")
+            logger.info(
+                f"  - Serial: {p['serial_number']}, Row: {p['row_index']}, "
+                f"AddFunds: {p.get('add_funds_status', '-')}, "
+                f"FeeToken: {p.get('fee_token_status', '-')}, "
+                f"GM: {p.get('gm_status', '-')}, "
+                f"Overall: {p.get('overall_status', '-')}"
+            )
         return
     
     # Process profiles

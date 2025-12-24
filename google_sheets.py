@@ -64,7 +64,10 @@ class GoogleSheetsManager:
         
         Returns list of dicts with:
             - serial_number: int
-            - status: str
+            - add_funds_status: str
+            - fee_token_status: str
+            - gm_status: str
+            - overall_status: str
             - row_index: int (1-indexed, for updates)
         """
         worksheet = self._get_worksheet()
@@ -76,15 +79,22 @@ class GoogleSheetsManager:
         for row_idx, row in enumerate(all_values[1:], start=2):
             try:
                 serial_col = config.SHEET_SERIAL_NUMBER_COL
-                status_col = config.SHEET_STATUS_COL
                 
                 if len(row) > serial_col and row[serial_col]:
                     serial_number = int(row[serial_col])
-                    status = row[status_col] if len(row) > status_col else ""
+                    
+                    # Get status for each step
+                    add_funds_status = row[config.SHEET_ADD_FUNDS_STATUS_COL] if len(row) > config.SHEET_ADD_FUNDS_STATUS_COL else ""
+                    fee_token_status = row[config.SHEET_FEE_TOKEN_STATUS_COL] if len(row) > config.SHEET_FEE_TOKEN_STATUS_COL else ""
+                    gm_status = row[config.SHEET_GM_STATUS_COL] if len(row) > config.SHEET_GM_STATUS_COL else ""
+                    overall_status = row[config.SHEET_OVERALL_STATUS_COL] if len(row) > config.SHEET_OVERALL_STATUS_COL else ""
                     
                     profiles.append({
                         'serial_number': serial_number,
-                        'status': status,
+                        'add_funds_status': add_funds_status,
+                        'fee_token_status': fee_token_status,
+                        'gm_status': gm_status,
+                        'overall_status': overall_status,
                         'row_index': row_idx
                     })
             except (ValueError, IndexError) as e:
@@ -95,59 +105,78 @@ class GoogleSheetsManager:
         return profiles
     
     def get_pending_profiles(self) -> list[dict]:
-        """Get profiles that need processing (status is empty or 'pending')."""
+        """
+        Get profiles that need processing.
+        
+        A profile is pending if:
+        - Overall status is not 'Ready'
+        - OR any step status is not 'OK'
+        """
         all_profiles = self.get_all_profiles()
         
-        pending = [
-            p for p in all_profiles
-            if not p['status'] or p['status'].lower() in ['pending', '']
-        ]
+        pending = []
+        for p in all_profiles:
+            overall = p['overall_status'].strip().lower()
+            
+            # Profile is pending if not marked as Ready
+            if overall != 'ready':
+                pending.append(p)
         
         logger.info(f"Found {len(pending)} pending profiles")
         return pending
     
-    def update_status(self, row_index: int, status: str, timestamp: bool = True) -> bool:
-        """
-        Update profile status in the sheet.
-        
-        Args:
-            row_index: 1-indexed row number
-            status: New status value
-            timestamp: Whether to update timestamp column
-        """
+    def _update_cell(self, row_index: int, col_index: int, value: str) -> bool:
+        """Update a single cell value."""
         try:
             worksheet = self._get_worksheet()
-            
-            # Update status column (1-indexed in gspread)
-            status_col = config.SHEET_STATUS_COL + 1
-            worksheet.update_cell(row_index, status_col, status)
-            
-            if timestamp:
-                timestamp_col = config.SHEET_TIMESTAMP_COL + 1
-                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                worksheet.update_cell(row_index, timestamp_col, now)
-            
-            logger.info(f"Updated row {row_index}: status={status}")
+            # gspread uses 1-indexed columns
+            worksheet.update_cell(row_index, col_index + 1, value)
             return True
-            
         except Exception as e:
-            logger.error(f"Failed to update row {row_index}: {e}")
+            logger.error(f"Failed to update cell ({row_index}, {col_index}): {e}")
             return False
     
-    def mark_in_progress(self, row_index: int) -> bool:
-        """Mark profile as in progress."""
-        return self.update_status(row_index, config.STATUS_IN_PROGRESS, timestamp=False)
+    def update_add_funds_status(self, row_index: int, success: bool) -> bool:
+        """Update Add Funds step status."""
+        status = config.STATUS_OK if success else config.STATUS_FAILED
+        result = self._update_cell(row_index, config.SHEET_ADD_FUNDS_STATUS_COL, status)
+        logger.info(f"Row {row_index}: Add Funds = {status}")
+        return result
+    
+    def update_fee_token_status(self, row_index: int, success: bool) -> bool:
+        """Update Set fee token step status."""
+        status = config.STATUS_OK if success else config.STATUS_FAILED
+        result = self._update_cell(row_index, config.SHEET_FEE_TOKEN_STATUS_COL, status)
+        logger.info(f"Row {row_index}: Fee Token = {status}")
+        return result
+    
+    def update_gm_status(self, row_index: int, success: bool) -> bool:
+        """Update GM transaction step status."""
+        status = config.STATUS_OK if success else config.STATUS_FAILED
+        result = self._update_cell(row_index, config.SHEET_GM_STATUS_COL, status)
+        logger.info(f"Row {row_index}: GM = {status}")
+        return result
+    
+    def update_overall_status(self, row_index: int, success: bool, error_msg: str = None) -> bool:
+        """Update overall status."""
+        if success:
+            status = config.STATUS_READY
+        else:
+            status = f"{config.STATUS_ERROR}"
+            if error_msg:
+                status = f"{config.STATUS_ERROR}: {error_msg[:30]}"
+        
+        result = self._update_cell(row_index, config.SHEET_OVERALL_STATUS_COL, status)
+        logger.info(f"Row {row_index}: Overall = {status}")
+        return result
     
     def mark_completed(self, row_index: int) -> bool:
-        """Mark profile as completed."""
-        return self.update_status(row_index, config.STATUS_COMPLETED)
+        """Mark profile as fully completed (Ready)."""
+        return self.update_overall_status(row_index, success=True)
     
     def mark_failed(self, row_index: int, error: str = None) -> bool:
-        """Mark profile as failed."""
-        status = config.STATUS_FAILED
-        if error:
-            status = f"{status}: {error[:50]}"
-        return self.update_status(row_index, status)
+        """Mark profile as failed (Error)."""
+        return self.update_overall_status(row_index, success=False, error_msg=error)
 
 
 def get_google_sheets_manager() -> GoogleSheetsManager:

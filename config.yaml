@@ -1,0 +1,59 @@
+# Tempo Testnet Automation Configuration
+
+# AdsPower Settings
+adspower:
+  api_url: "http://local.adspower.net:50325"
+  api_key: ""
+
+# Google Sheets Settings
+google_sheets:
+  sheet_id: "YOUR_SHEET_ID_HERE"
+  credentials_path: "credentials.json"
+  sheet_name: "Testnet (v1) (test)"
+
+# Sheet Column Configuration (0-indexed)
+# Column A = Profile Number (serial_number)
+# Column B = Address (wallets)
+# Column C = Add Funds status
+# Column D = Set fee token status
+# Column E = GM status
+# Column F = Overall Ready/Error status
+columns:
+  serial_number: 0      # Column A - Profile Number
+  address: 1            # Column B - Address (not used)
+  add_funds_status: 2   # Column C - Add Funds status
+  fee_token_status: 3   # Column D - Set fee token status
+  gm_status: 4          # Column E - GM status
+  overall_status: 5     # Column F - Overall Ready/Error status
+
+# MetaMask Password Pattern
+# Password will be: prefix + serial_number
+metamask:
+  password_prefix: "ОткрываюМетамаск!"
+
+# Parallelism
+processing:
+  max_parallel_profiles: 1
+
+# Timeouts (seconds)
+timeouts:
+  page_load: 30
+  element_wait: 15
+  transaction: 60
+
+# Target URLs
+urls:
+  tempo_faucet: "https://docs.tempo.xyz/quickstart/faucet"
+  onchaingm: "https://onchaingm.com/"
+
+# Tempo Network Details
+tempo_network:
+  id: "42429"
+  name: "Tempo Testnet"
+
+# Status values
+statuses:
+  ok: "OK"
+  failed: "FAILED"
+  ready: "Ready"
+  error: "Error"
